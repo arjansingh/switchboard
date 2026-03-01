@@ -208,7 +208,7 @@ func queryProfiles(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.
 
 // listCohorts queries POST /cohorts/list for all saved cohorts.
 func listCohorts(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.ToolResult, error) {
-	data, err := m.query(ctx, "POST", "/cohorts/list", nil)
+	data, err := m.query(ctx, "GET", "/cohorts/list", nil)
 	if err != nil {
 		return errResult(err)
 	}

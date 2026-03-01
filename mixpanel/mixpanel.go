@@ -40,19 +40,23 @@ func New() mcp.Integration {
 func (m *mixpanel) Name() string { return "mixpanel" }
 
 func (m *mixpanel) Configure(creds mcp.Credentials) error {
-	m.username = creds["service_account_username"]
-	m.secret = creds["service_account_secret"]
-	m.projectID = creds["project_id"]
+	username := creds["service_account_username"]
+	secret := creds["service_account_secret"]
+	projectID := creds["project_id"]
 
-	if m.username == "" {
+	if username == "" {
 		return fmt.Errorf("mixpanel: service_account_username is required")
 	}
-	if m.secret == "" {
+	if secret == "" {
 		return fmt.Errorf("mixpanel: service_account_secret is required")
 	}
-	if m.projectID == "" {
+	if projectID == "" {
 		return fmt.Errorf("mixpanel: project_id is required")
 	}
+
+	m.username = username
+	m.secret = secret
+	m.projectID = projectID
 	if v := creds["base_url"]; v != "" {
 		m.baseURL = strings.TrimRight(v, "/")
 	}
@@ -66,7 +70,7 @@ func (m *mixpanel) Configure(creds mcp.Credentials) error {
 }
 
 func (m *mixpanel) Healthy(ctx context.Context) bool {
-	_, err := m.query(ctx, "GET", "events/top?type=general&limit=1", nil)
+	_, err := m.query(ctx, "GET", "/events/top?type=general&limit=1", nil)
 	return err == nil
 }
 
@@ -183,6 +187,12 @@ func errResult(err error) (*mcp.ToolResult, error) {
 func argStr(args map[string]any, key string) string {
 	v, _ := args[key].(string)
 	return v
+}
+
+// argPath extracts a string argument and URL-path-escapes it.
+// Use for values interpolated into URL path segments (not query params).
+func argPath(args map[string]any, key string) string {
+	return url.PathEscape(argStr(args, key))
 }
 
 func argInt(args map[string]any, key string) int {

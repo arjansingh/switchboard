@@ -174,7 +174,7 @@ func TestHealthy_Success(t *testing.T) {
 		secret:    "test-secret",
 		projectID: "12345",
 		client:    ts.Client(),
-		queryBase: ts.URL + "/api/query/",
+		queryBase: ts.URL + "/api/query",
 	}
 	assert.True(t, m.Healthy(context.Background()))
 }
@@ -191,7 +191,7 @@ func TestHealthy_Failure(t *testing.T) {
 		secret:    "bad-secret",
 		projectID: "12345",
 		client:    ts.Client(),
-		queryBase: ts.URL + "/api/query/",
+		queryBase: ts.URL + "/api/query",
 	}
 	assert.False(t, m.Healthy(context.Background()))
 }
@@ -1104,7 +1104,7 @@ func TestQueryProfiles_WithPagination(t *testing.T) {
 
 func TestListCohorts(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "GET", r.Method)
 		assert.Contains(t, r.URL.Path, "/api/query/cohorts/list")
 		_, _ = w.Write([]byte(`[{"id":1,"name":"Power Users"},{"id":2,"name":"Churned"}]`))
 	}))

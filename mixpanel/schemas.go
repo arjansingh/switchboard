@@ -35,7 +35,7 @@ func createAnnotation(ctx context.Context, m *mixpanel, args map[string]any) (*m
 }
 
 func deleteAnnotation(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.ToolResult, error) {
-	id := argStr(args, "annotation_id")
+	id := argPath(args, "annotation_id")
 	data, err := m.app(ctx, "DELETE", "/annotations/"+id, nil)
 	if err != nil {
 		return errResult(err)
@@ -54,7 +54,7 @@ func listSchemas(ctx context.Context, m *mixpanel, _ map[string]any) (*mcp.ToolR
 }
 
 func listSchemasByEntity(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.ToolResult, error) {
-	entity := argStr(args, "entity")
+	entity := argPath(args, "entity")
 	data, err := m.app(ctx, "GET", "/schemas/"+entity, nil)
 	if err != nil {
 		return errResult(err)
@@ -63,8 +63,8 @@ func listSchemasByEntity(ctx context.Context, m *mixpanel, args map[string]any) 
 }
 
 func getSchema(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.ToolResult, error) {
-	entity := argStr(args, "entity")
-	name := argStr(args, "name")
+	entity := argPath(args, "entity")
+	name := argPath(args, "name")
 	data, err := m.app(ctx, "GET", "/schemas/"+entity+"/"+name, nil)
 	if err != nil {
 		return errResult(err)
@@ -85,8 +85,8 @@ func createSchemas(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.
 }
 
 func createSchema(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.ToolResult, error) {
-	entity := argStr(args, "entity")
-	name := argStr(args, "name")
+	entity := argPath(args, "entity")
+	name := argPath(args, "name")
 	var schema any
 	if err := json.Unmarshal([]byte(argStr(args, "schema")), &schema); err != nil {
 		return errResult(fmt.Errorf("invalid JSON for schema: %w", err))
@@ -107,7 +107,7 @@ func deleteAllSchemas(ctx context.Context, m *mixpanel, _ map[string]any) (*mcp.
 }
 
 func deleteSchemasByEntity(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.ToolResult, error) {
-	entity := argStr(args, "entity")
+	entity := argPath(args, "entity")
 	data, err := m.app(ctx, "DELETE", "/schemas/"+entity, nil)
 	if err != nil {
 		return errResult(err)
@@ -116,8 +116,8 @@ func deleteSchemasByEntity(ctx context.Context, m *mixpanel, args map[string]any
 }
 
 func deleteSchema(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.ToolResult, error) {
-	entity := argStr(args, "entity")
-	name := argStr(args, "name")
+	entity := argPath(args, "entity")
+	name := argPath(args, "name")
 	data, err := m.app(ctx, "DELETE", "/schemas/"+entity+"/"+name, nil)
 	if err != nil {
 		return errResult(err)
