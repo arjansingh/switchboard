@@ -95,7 +95,6 @@ func listFunnels(ctx context.Context, m *mixpanel, _ map[string]any) (*mcp.ToolR
 
 func queryFunnel(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.ToolResult, error) {
 	params := queryEncode(map[string]string{
-		"funnel_id":   strconv.Itoa(argInt(args, "funnel_id")),
 		"from_date":   argStr(args, "from_date"),
 		"to_date":     argStr(args, "to_date"),
 		"length_unit": argStr(args, "length_unit"),
@@ -103,6 +102,9 @@ func queryFunnel(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.To
 		"on":          argStr(args, "on"),
 		"where":       argStr(args, "where"),
 	})
+	if v := argInt(args, "funnel_id"); v > 0 {
+		params += "&funnel_id=" + strconv.Itoa(v)
+	}
 	if v := argInt(args, "length"); v > 0 {
 		params += "&length=" + strconv.Itoa(v)
 	}
@@ -169,9 +171,10 @@ func queryFrequency(ctx context.Context, m *mixpanel, args map[string]any) (*mcp
 // --- Insights + JQL handlers ---
 
 func queryInsight(ctx context.Context, m *mixpanel, args map[string]any) (*mcp.ToolResult, error) {
-	params := queryEncode(map[string]string{
-		"bookmark_id": strconv.Itoa(argInt(args, "bookmark_id")),
-	})
+	params := ""
+	if v := argInt(args, "bookmark_id"); v > 0 {
+		params = "?bookmark_id=" + strconv.Itoa(v)
+	}
 	data, err := m.query(ctx, "GET", "/insights"+params, nil)
 	if err != nil {
 		return errResult(err)
