@@ -1,10 +1,6 @@
 package mixpanel
 
-import (
-	"context"
-
-	mcp "github.com/daltoniam/switchboard"
-)
+import mcp "github.com/daltoniam/switchboard"
 
 var tools = []mcp.ToolDefinition{
 	// ── Segmentation ────────────────────────────────────────────────
@@ -234,8 +230,4 @@ var dispatch = map[string]handlerFunc{
 	"mixpanel_delete_all_schemas":       deleteAllSchemas,
 	"mixpanel_delete_schemas_by_entity": deleteSchemasByEntity,
 	"mixpanel_delete_schema":            deleteSchema,
-}
-
-func stubHandler(_ context.Context, _ *mixpanel, _ map[string]any) (*mcp.ToolResult, error) {
-	return &mcp.ToolResult{Data: "not implemented", IsError: true}, nil
 }

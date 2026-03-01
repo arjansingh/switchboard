@@ -55,6 +55,9 @@ func (w *WebServer) Handler() http.Handler {
 	mux.HandleFunc("GET /api/linear/oauth/poll", w.handleLinearOAuthPoll)
 	mux.HandleFunc("POST /api/linear/save-token", w.handleLinearSaveToken)
 
+	mux.HandleFunc("GET /integrations/mixpanel/setup", w.handleMixpanelSetup)
+	mux.HandleFunc("POST /api/mixpanel/save-credentials", w.handleMixpanelSaveCredentials)
+
 	mux.HandleFunc("GET /integrations/sentry/setup", w.handleSentrySetup)
 	mux.HandleFunc("POST /api/sentry/oauth/start", w.handleSentryOAuthStart)
 	mux.HandleFunc("GET /api/sentry/oauth/poll", w.handleSentryOAuthPoll)
@@ -150,10 +153,11 @@ func (w *WebServer) handleIntegrationsList(rw http.ResponseWriter, r *http.Reque
 }
 
 var setupIntegrations = map[string]bool{
-	"slack":  true,
-	"github": true,
-	"linear": true,
-	"sentry": true,
+	"slack":    true,
+	"github":   true,
+	"linear":   true,
+	"sentry":   true,
+	"mixpanel": true,
 }
 
 func (w *WebServer) handleIntegrationDetail(rw http.ResponseWriter, r *http.Request) {
@@ -555,6 +559,78 @@ func (w *WebServer) handleLinearSaveToken(rw http.ResponseWriter, r *http.Reques
 	_ = w.services.Config.SetIntegration("linear", ic)
 
 	http.Redirect(rw, r, "/integrations/linear/setup?result=API+key+saved+successfully", http.StatusSeeOther)
+}
+
+func (w *WebServer) handleMixpanelSetup(rw http.ResponseWriter, r *http.Request) {
+	ic, exists := w.services.Config.GetIntegration("mixpanel")
+	hasCreds := exists && ic.Credentials["service_account_username"] != "" && ic.Credentials["service_account_secret"] != ""
+
+	var healthy bool
+	if hasCreds {
+		integration, ok := w.services.Registry.Get("mixpanel")
+		if ok && integration.Configure(ic.Credentials) == nil {
+			healthy = integration.Healthy(r.Context())
+		}
+	}
+
+	var baseURL string
+	if exists {
+		baseURL = ic.Credentials["base_url"]
+	}
+
+	page := w.pageData(r, "Mixpanel Setup", "/integrations")
+	data := pages.MixpanelSetupData{
+		HasCredentials: hasCreds,
+		Healthy:        healthy,
+		BaseURL:        baseURL,
+	}
+
+	if flash := r.URL.Query().Get("result"); flash != "" {
+		data.FlashResult = flash
+	}
+	if flash := r.URL.Query().Get("error"); flash != "" {
+		data.FlashError = flash
+	}
+
+	pages.MixpanelSetup(page, data).Render(r.Context(), rw)
+}
+
+func (w *WebServer) handleMixpanelSaveCredentials(rw http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(rw, r, "/integrations/mixpanel/setup?error=Invalid+form+data", http.StatusSeeOther)
+		return
+	}
+
+	username := strings.TrimSpace(r.FormValue("service_account_username"))
+	secret := strings.TrimSpace(r.FormValue("service_account_secret"))
+	projectID := strings.TrimSpace(r.FormValue("project_id"))
+	baseURL := strings.TrimSpace(r.FormValue("base_url"))
+
+	if username == "" {
+		http.Redirect(rw, r, "/integrations/mixpanel/setup?error=Service+account+username+is+required", http.StatusSeeOther)
+		return
+	}
+	if secret == "" {
+		http.Redirect(rw, r, "/integrations/mixpanel/setup?error=Service+account+secret+is+required", http.StatusSeeOther)
+		return
+	}
+	if projectID == "" {
+		http.Redirect(rw, r, "/integrations/mixpanel/setup?error=Project+ID+is+required", http.StatusSeeOther)
+		return
+	}
+
+	ic, _ := w.services.Config.GetIntegration("mixpanel")
+	if ic == nil {
+		ic = &mcp.IntegrationConfig{Credentials: mcp.Credentials{}}
+	}
+	ic.Enabled = true
+	ic.Credentials["service_account_username"] = username
+	ic.Credentials["service_account_secret"] = secret
+	ic.Credentials["project_id"] = projectID
+	ic.Credentials["base_url"] = baseURL
+	_ = w.services.Config.SetIntegration("mixpanel", ic)
+
+	http.Redirect(rw, r, "/integrations/mixpanel/setup?result=Credentials+saved+successfully", http.StatusSeeOther)
 }
 
 func (w *WebServer) handleSentrySetup(rw http.ResponseWriter, r *http.Request) {

@@ -20,6 +20,7 @@ import (
 	"github.com/daltoniam/switchboard/github"
 	"github.com/daltoniam/switchboard/linear"
 	"github.com/daltoniam/switchboard/metabase"
+	"github.com/daltoniam/switchboard/mixpanel"
 	"github.com/daltoniam/switchboard/posthog"
 	"github.com/daltoniam/switchboard/postgres"
 	"github.com/daltoniam/switchboard/registry"
@@ -173,6 +174,7 @@ func runServer(stdioMode bool, port int) {
 		metabase.New(),
 		awsInt.New(),
 		posthog.New(),
+		mixpanel.New(),
 		postgres.New(),
 		clickhouse.New(),
 	} {

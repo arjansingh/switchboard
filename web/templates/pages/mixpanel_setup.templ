@@ -1,0 +1,86 @@
+package pages
+
+import (
+	"github.com/daltoniam/switchboard/web/templates/layouts"
+	"github.com/daltoniam/switchboard/web/templates/components"
+)
+
+type MixpanelSetupData struct {
+	HasCredentials bool
+	Healthy        bool
+	BaseURL        string
+	FlashResult    string
+	FlashError     string
+}
+
+func mixpanelStatusBadge(hasCreds bool, healthy bool) string {
+	if healthy {
+		return "green"
+	}
+	if hasCreds {
+		return "red"
+	}
+	return "muted"
+}
+
+func mixpanelStatusLabel(hasCreds bool, healthy bool) string {
+	if healthy {
+		return "Connected"
+	}
+	if hasCreds {
+		return "Invalid Credentials"
+	}
+	return "Not Connected"
+}
+
+templ MixpanelSetup(page layouts.PageData, data MixpanelSetupData) {
+	@layouts.Base(page) {
+		<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.5rem;">
+			<a href="/integrations" class="btn btn-sm btn-outline">← Back</a>
+			<h1 class="page-title" style="margin-bottom: 0;">Mixpanel Setup</h1>
+			@components.Badge(mixpanelStatusLabel(data.HasCredentials, data.Healthy), mixpanelStatusBadge(data.HasCredentials, data.Healthy))
+		</div>
+		if data.FlashResult != "" {
+			<div class="flash flash-success">{ data.FlashResult }</div>
+		}
+		if data.FlashError != "" {
+			<div class="flash flash-error">{ data.FlashError }</div>
+		}
+		if data.HasCredentials && data.Healthy {
+			<div class="card">
+				<div class="card-header">
+					<div class="card-title">Current Connection</div>
+					@components.Badge("Connected", "green")
+				</div>
+				<p style="color: var(--text-muted); font-size: 0.85rem;">
+					Mixpanel is connected. You can update your credentials below.
+				</p>
+			</div>
+		}
+		<div class="card">
+			<div class="card-title" style="margin-bottom: 0.75rem;">How to get your Mixpanel service account</div>
+			<ol style="color: var(--text-muted); font-size: 0.85rem; line-height: 1.8; padding-left: 1.25rem; margin-bottom: 1rem;">
+				<li>
+					Go to your
+					<a href="https://mixpanel.com/settings/project" target="_blank" style="color: var(--accent);">Mixpanel Project Settings</a>.
+				</li>
+				<li>Navigate to <strong>Service Accounts</strong> and click <strong>Add Service Account</strong>.</li>
+				<li>Copy the <strong>Username</strong> and <strong>Secret</strong>.</li>
+				<li>Note your <strong>Project ID</strong> from the project settings page.</li>
+			</ol>
+			<div style="background: var(--bg-subtle); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
+				<strong>Region:</strong> The default region is US (<code>mixpanel</code>). For EU, use <code>eu.mixpanel</code>. For India, use <code>in.mixpanel</code>.
+			</div>
+		</div>
+		<div class="card">
+			<div class="card-title" style="margin-bottom: 0.75rem;">Service Account Credentials</div>
+			<form method="POST" action="/api/mixpanel/save-credentials">
+				@components.FormGroup("Service Account Username", "service_account_username", "text", "", "Enter username")
+				@components.FormGroup("Service Account Secret", "service_account_secret", "password", "", "Enter secret")
+				@components.FormGroup("Project ID", "project_id", "text", "", "Enter project ID")
+				@components.FormGroup("Base URL (optional)", "base_url", "text", data.BaseURL, "mixpanel")
+				<button type="submit" class="btn">Save Credentials</button>
+			</form>
+		</div>
+	}
+}
