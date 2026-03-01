@@ -183,57 +183,57 @@ var tools = []mcp.ToolDefinition{
 
 var dispatch = map[string]handlerFunc{
 	// Segmentation
-	"mixpanel_query_segmentation":         stubHandler,
-	"mixpanel_query_segmentation_numeric": stubHandler,
-	"mixpanel_query_segmentation_sum":     stubHandler,
-	"mixpanel_query_segmentation_average": stubHandler,
+	"mixpanel_query_segmentation":         querySegmentation,
+	"mixpanel_query_segmentation_numeric": querySegmentationNumeric,
+	"mixpanel_query_segmentation_sum":     querySegmentationSum,
+	"mixpanel_query_segmentation_average": querySegmentationAverage,
 
 	// Funnels
-	"mixpanel_list_funnels": stubHandler,
-	"mixpanel_query_funnel": stubHandler,
+	"mixpanel_list_funnels": listFunnels,
+	"mixpanel_query_funnel": queryFunnel,
 
 	// Retention
-	"mixpanel_query_retention":  stubHandler,
-	"mixpanel_query_frequency":  stubHandler,
+	"mixpanel_query_retention": queryRetention,
+	"mixpanel_query_frequency": queryFrequency,
 
 	// Insights + JQL
-	"mixpanel_query_insight": stubHandler,
-	"mixpanel_query_jql":     stubHandler,
+	"mixpanel_query_insight": queryInsight,
+	"mixpanel_query_jql":     queryJQL,
 
 	// Event Breakdown
-	"mixpanel_aggregate_events":      stubHandler,
-	"mixpanel_top_events_today":      stubHandler,
-	"mixpanel_top_event_names":       stubHandler,
-	"mixpanel_event_property_values": stubHandler,
-	"mixpanel_top_event_properties":  stubHandler,
-	"mixpanel_top_property_values":   stubHandler,
+	"mixpanel_aggregate_events":      aggregateEvents,
+	"mixpanel_top_events_today":      topEventsToday,
+	"mixpanel_top_event_names":       topEventNames,
+	"mixpanel_event_property_values": eventPropertyValues,
+	"mixpanel_top_event_properties":  topEventProperties,
+	"mixpanel_top_property_values":   topPropertyValues,
 
 	// Raw Export
-	"mixpanel_export_events": stubHandler,
+	"mixpanel_export_events": exportEvents,
 
 	// Activity Feed
-	"mixpanel_query_activity": stubHandler,
+	"mixpanel_query_activity": queryActivity,
 
 	// Profiles
-	"mixpanel_query_profiles": stubHandler,
+	"mixpanel_query_profiles": queryProfiles,
 
 	// Cohorts
-	"mixpanel_list_cohorts": stubHandler,
+	"mixpanel_list_cohorts": listCohorts,
 
 	// Annotations
-	"mixpanel_list_annotations":   stubHandler,
-	"mixpanel_create_annotation":  stubHandler,
-	"mixpanel_delete_annotation":  stubHandler,
+	"mixpanel_list_annotations":  listAnnotations,
+	"mixpanel_create_annotation": createAnnotation,
+	"mixpanel_delete_annotation": deleteAnnotation,
 
 	// Lexicon Schemas
-	"mixpanel_list_schemas":            stubHandler,
-	"mixpanel_list_schemas_by_entity":  stubHandler,
-	"mixpanel_get_schema":              stubHandler,
-	"mixpanel_create_schemas":          stubHandler,
-	"mixpanel_create_schema":           stubHandler,
-	"mixpanel_delete_all_schemas":      stubHandler,
-	"mixpanel_delete_schemas_by_entity": stubHandler,
-	"mixpanel_delete_schema":           stubHandler,
+	"mixpanel_list_schemas":             listSchemas,
+	"mixpanel_list_schemas_by_entity":   listSchemasByEntity,
+	"mixpanel_get_schema":               getSchema,
+	"mixpanel_create_schemas":           createSchemas,
+	"mixpanel_create_schema":            createSchema,
+	"mixpanel_delete_all_schemas":       deleteAllSchemas,
+	"mixpanel_delete_schemas_by_entity": deleteSchemasByEntity,
+	"mixpanel_delete_schema":            deleteSchema,
 }
 
 func stubHandler(_ context.Context, _ *mixpanel, _ map[string]any) (*mcp.ToolResult, error) {
