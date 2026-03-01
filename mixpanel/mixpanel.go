@@ -65,16 +65,21 @@ func (m *mixpanel) Configure(creds mcp.Credentials) error {
 	return nil
 }
 
-func (m *mixpanel) Healthy(_ context.Context) bool {
-	return false
+func (m *mixpanel) Healthy(ctx context.Context) bool {
+	_, err := m.query(ctx, "GET", "events/top?type=general&limit=1", nil)
+	return err == nil
 }
 
 func (m *mixpanel) Tools() []mcp.ToolDefinition {
-	return nil
+	return tools
 }
 
-func (m *mixpanel) Execute(_ context.Context, toolName string, _ map[string]any) (*mcp.ToolResult, error) {
-	return &mcp.ToolResult{Data: fmt.Sprintf("unknown tool: %s", toolName), IsError: true}, nil
+func (m *mixpanel) Execute(ctx context.Context, toolName string, args map[string]any) (*mcp.ToolResult, error) {
+	fn, ok := dispatch[toolName]
+	if !ok {
+		return &mcp.ToolResult{Data: fmt.Sprintf("unknown tool: %s", toolName), IsError: true}, nil
+	}
+	return fn(ctx, m, args)
 }
 
 // --- HTTP helpers ---

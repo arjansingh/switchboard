@@ -92,17 +92,36 @@ func TestConfigure_DefaultBaseURL(t *testing.T) {
 	assert.Equal(t, "https://mixpanel.com/api/app/projects/99", m.appBase)
 }
 
-// --- Stubs tests ---
+// --- Tools tests ---
 
-func TestHealthy_ReturnsFalse(t *testing.T) {
-	m := &mixpanel{client: &http.Client{}}
-	assert.False(t, m.Healthy(context.Background()))
+func TestTools(t *testing.T) {
+	i := New()
+	tools := i.Tools()
+	assert.NotEmpty(t, tools)
+
+	for _, tool := range tools {
+		assert.NotEmpty(t, tool.Name, "tool has empty name")
+		assert.NotEmpty(t, tool.Description, "tool %s has empty description", tool.Name)
+	}
 }
 
-func TestTools_ReturnsNil(t *testing.T) {
-	m := &mixpanel{client: &http.Client{}}
-	assert.Nil(t, m.Tools())
+func TestTools_AllHaveMixpanelPrefix(t *testing.T) {
+	i := New()
+	for _, tool := range i.Tools() {
+		assert.Contains(t, tool.Name, "mixpanel_", "tool %s missing mixpanel_ prefix", tool.Name)
+	}
 }
+
+func TestTools_NoDuplicateNames(t *testing.T) {
+	i := New()
+	seen := make(map[string]bool)
+	for _, tool := range i.Tools() {
+		assert.False(t, seen[tool.Name], "duplicate tool name: %s", tool.Name)
+		seen[tool.Name] = true
+	}
+}
+
+// --- Execute tests ---
 
 func TestExecute_UnknownTool(t *testing.T) {
 	m := &mixpanel{
@@ -116,6 +135,65 @@ func TestExecute_UnknownTool(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 	assert.Contains(t, result.Data, "unknown tool")
+}
+
+// --- Dispatch parity tests ---
+
+func TestDispatchMap_AllToolsCovered(t *testing.T) {
+	i := New()
+	for _, tool := range i.Tools() {
+		_, ok := dispatch[tool.Name]
+		assert.True(t, ok, "tool %s has no dispatch handler", tool.Name)
+	}
+}
+
+func TestDispatchMap_NoOrphanHandlers(t *testing.T) {
+	i := New()
+	toolNames := make(map[string]bool)
+	for _, tool := range i.Tools() {
+		toolNames[tool.Name] = true
+	}
+	for name := range dispatch {
+		assert.True(t, toolNames[name], "dispatch handler %s has no tool definition", name)
+	}
+}
+
+// --- Healthy tests ---
+
+func TestHealthy_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Contains(t, r.URL.Path, "/api/query/events/top")
+		assert.Equal(t, "general", r.URL.Query().Get("type"))
+		assert.Equal(t, "1", r.URL.Query().Get("limit"))
+		_, _ = w.Write([]byte(`[{"event":"pageview","amount":100}]`))
+	}))
+	defer ts.Close()
+
+	m := &mixpanel{
+		username:  "test-user",
+		secret:    "test-secret",
+		projectID: "12345",
+		client:    ts.Client(),
+		queryBase: ts.URL + "/api/query/",
+	}
+	assert.True(t, m.Healthy(context.Background()))
+}
+
+func TestHealthy_Failure(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(401)
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer ts.Close()
+
+	m := &mixpanel{
+		username:  "test-user",
+		secret:    "bad-secret",
+		projectID: "12345",
+		client:    ts.Client(),
+		queryBase: ts.URL + "/api/query/",
+	}
+	assert.False(t, m.Healthy(context.Background()))
 }
 
 // --- HTTP helper tests ---
