@@ -277,9 +277,51 @@ func TestApp_Success(t *testing.T) {
 		client:    ts.Client(),
 		appBase:   ts.URL + "/api/app/projects/12345",
 	}
-	data, err := m.app(context.Background(), "/custom-events")
+	data, err := m.app(context.Background(), "GET", "/custom-events", nil)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "signup")
+}
+
+func TestExport_APIError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
+	}))
+	defer ts.Close()
+
+	m := &mixpanel{
+		username:   "test-user",
+		secret:     "test-secret",
+		projectID:  "12345",
+		client:     ts.Client(),
+		exportBase: ts.URL + "/api/2.0",
+	}
+	_, err := m.export(context.Background(), "/export?from_date=2024-01-01&to_date=2024-01-02")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mixpanel API error (429)")
+}
+
+func TestApp_POST(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		assert.Equal(t, "deploy v2", body["description"])
+		_, _ = w.Write([]byte(`{"id":1,"description":"deploy v2"}`))
+	}))
+	defer ts.Close()
+
+	m := &mixpanel{
+		username:  "test-user",
+		secret:    "test-secret",
+		projectID: "12345",
+		client:    ts.Client(),
+		appBase:   ts.URL + "/api/app/projects/12345",
+	}
+	data, err := m.app(context.Background(), "POST", "/annotations", map[string]string{"description": "deploy v2"})
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "deploy v2")
 }
 
 // --- Result helper tests ---

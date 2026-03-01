@@ -156,10 +156,9 @@ func (m *mixpanel) export(ctx context.Context, path string) ([]byte, error) {
 }
 
 // app calls the Mixpanel App API. project_id is already embedded in the appBase URL.
-// path should start with "/" (e.g., "/custom-events").
-func (m *mixpanel) app(ctx context.Context, path string) (json.RawMessage, error) {
-	fullURL := m.appBase + path
-	return m.doRequest(ctx, "GET", fullURL, nil)
+// path should start with "/" (e.g., "/annotations").
+func (m *mixpanel) app(ctx context.Context, method, path string, body any) (json.RawMessage, error) {
+	return m.doRequest(ctx, method, m.appBase+path, body)
 }
 
 // --- Result helpers ---
