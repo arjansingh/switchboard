@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -417,6 +418,179 @@ func compactArray(data []byte, fields []CompactField, plan *fieldPlan) ([]byte, 
 	}
 
 	return json.Marshal(result)
+}
+
+// CompactColumnarJSON applies field compaction and serializes arrays in columnar format.
+// Arrays become {"columns": [...], "rows": [[...], ...]} — eliminates per-record key repetition.
+// Single objects are compacted normally (columnar adds no value for 1 record).
+// Empty/nil fields returns data unchanged (passthrough).
+func CompactColumnarJSON(data []byte, fields []CompactField) ([]byte, error) {
+	if len(data) == 0 || len(fields) == 0 {
+		return data, nil
+	}
+
+	trimmed := bytes.TrimLeft(data, " \t\n\r")
+	if len(trimmed) == 0 {
+		return data, nil
+	}
+
+	plan := buildFieldPlan(fields)
+
+	switch trimmed[0] {
+	case '[':
+		return compactColumnarArray(data, fields, plan)
+	case '{':
+		return compactColumnarObjectJSON(data, fields, plan)
+	default:
+		return nil, fmt.Errorf("compactColumnarJSON: expected JSON object or array, got %q", trimmed[0])
+	}
+}
+
+// compactColumnarObjectJSON compacts a single JSON object and columnarizes any
+// nested arrays of objects (e.g., {"results": [{...}, {...}]} → {"results": {"columns":[...],"rows":[[...],...]}}).
+func compactColumnarObjectJSON(data []byte, fields []CompactField, plan *fieldPlan) ([]byte, error) {
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return nil, fmt.Errorf("compactColumnarJSON: %w", err)
+	}
+	result := compactObject(obj, fields, plan)
+	columnarizeNestedArrays(result)
+	return json.Marshal(result)
+}
+
+// columnarMinItems is the minimum array length for columnar format.
+// Smaller arrays stay per-record — readability outweighs the marginal byte savings.
+const columnarMinItems = 4
+
+// compactColumnarArray applies field compaction to each element, then serializes
+// as {"columns": [...], "rows": [[...], ...]} to eliminate per-record key repetition.
+// Falls back to per-record format for arrays smaller than columnarMinItems or
+// containing non-object elements.
+func compactColumnarArray(data []byte, fields []CompactField, plan *fieldPlan) ([]byte, error) {
+	var arr []any
+	if err := json.Unmarshal(data, &arr); err != nil {
+		return nil, fmt.Errorf("compactColumnarJSON: %w", err)
+	}
+
+	if len(arr) == 0 {
+		return data, nil
+	}
+
+	// Compact all elements. If any element is not an object, fall back to per-record.
+	compacted := make([]map[string]any, 0, len(arr))
+	for _, elem := range arr {
+		obj, ok := elem.(map[string]any)
+		if !ok {
+			return compactArray(data, fields, plan)
+		}
+		compacted = append(compacted, compactObject(obj, fields, plan))
+	}
+
+	// Small arrays: per-record is more readable and the savings are marginal.
+	if len(compacted) < columnarMinItems {
+		return json.Marshal(compacted)
+	}
+
+	// Derive column order.
+	columns := columnsFromFields(fields, plan, compacted)
+
+	// Build rows: extract values in column order from each compacted object.
+	rows := make([][]any, len(compacted))
+	for i, obj := range compacted {
+		row := make([]any, len(columns))
+		for j, col := range columns {
+			row[j] = obj[col] // nil if missing
+		}
+		rows[i] = row
+	}
+
+	return json.Marshal(map[string]any{
+		"columns": columns,
+		"rows":    rows,
+	})
+}
+
+// columnsFromFields derives deterministic column names and ordering.
+// Include mode: spec declaration order (deduplicated by outputKey).
+// Exclude mode: sorted keys from first compacted object.
+func columnsFromFields(fields []CompactField, plan *fieldPlan, compacted []map[string]any) []string {
+	if !plan.hasIncludes && len(plan.excludes) > 0 {
+		// Exclude mode: derive from first compacted object, sorted.
+		if len(compacted) == 0 {
+			return nil
+		}
+		keys := make([]string, 0, len(compacted[0]))
+		for k := range compacted[0] {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return keys
+	}
+
+	// Include mode: spec declaration order, deduplicated.
+	seen := make(map[string]bool, len(fields))
+	columns := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f.exclude {
+			continue
+		}
+		key := f.outputKey
+		// Object groups use objectRoot as the output key (when 2+ members).
+		if f.objectRoot != "" {
+			if _, isGroup := plan.objectGroups[f.objectRoot]; isGroup {
+				key = f.objectRoot
+			}
+		}
+		if !seen[key] {
+			seen[key] = true
+			columns = append(columns, key)
+		}
+	}
+	return columns
+}
+
+// columnarizeNestedArrays walks a compacted object and converts any nested
+// []any where all elements are map[string]any into {"columns":[...],"rows":[[...],...]}.
+// Flat scalar arrays (like ["bug","P1"] from labels[].name) are left untouched.
+// Recurses into nested map[string]any values to handle deep envelopes (e.g., issues.nodes[]).
+func columnarizeNestedArrays(obj map[string]any) {
+	for key, val := range obj {
+		switch v := val.(type) {
+		case map[string]any:
+			columnarizeNestedArrays(v)
+		case []any:
+			if len(v) < columnarMinItems {
+				continue
+			}
+			objects := make([]map[string]any, 0, len(v))
+			for _, elem := range v {
+				m, ok := elem.(map[string]any)
+				if !ok {
+					objects = nil
+					break
+				}
+				objects = append(objects, m)
+			}
+			if objects == nil {
+				continue
+			}
+			// Collect columns from first object, sorted for deterministic output.
+			cols := make([]string, 0, len(objects[0]))
+			for k := range objects[0] {
+				cols = append(cols, k)
+			}
+			sort.Strings(cols)
+			rows := make([][]any, len(objects))
+			for i, o := range objects {
+				row := make([]any, len(cols))
+				for j, c := range cols {
+					row[j] = o[c]
+				}
+				rows[i] = row
+			}
+			obj[key] = map[string]any{"columns": cols, "rows": rows}
+		}
+	}
 }
 
 // extractField dispatches to the right extraction strategy based on the spec shape.

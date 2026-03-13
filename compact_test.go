@@ -828,6 +828,248 @@ func TestCompactJSON_Wildcard(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Columnar JSON compaction tests
+// ---------------------------------------------------------------------------
+
+func TestCompactColumnarJSON_Array(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		specs []string
+		want  string
+	}{
+		{
+			name: "small array stays per-record",
+			input: `[
+				{"number":1,"title":"bug","body":"long","node_id":"x"},
+				{"number":2,"title":"feat","body":"longer","node_id":"y"}
+			]`,
+			specs: []string{"number", "title"},
+			want:  `[{"number":1,"title":"bug"},{"number":2,"title":"feat"}]`,
+		},
+		{
+			name: "basic array becomes columns and rows",
+			input: `[
+				{"number":1,"title":"bug","body":"long","node_id":"x"},
+				{"number":2,"title":"feat","body":"longer","node_id":"y"},
+				{"number":3,"title":"chore","body":"short","node_id":"z"},
+				{"number":4,"title":"docs","body":"medium","node_id":"w"}
+			]`,
+			specs: []string{"number", "title"},
+			want:  `{"columns":["number","title"],"rows":[[1,"bug"],[2,"feat"],[3,"chore"],[4,"docs"]]}`,
+		},
+		{
+			name: "array with nested extraction",
+			input: `[
+				{"number":1,"user":{"login":"alice","id":1}},
+				{"number":2,"user":{"login":"bob","id":2}},
+				{"number":3,"user":{"login":"carol","id":3}},
+				{"number":4,"user":{"login":"dave","id":4}}
+			]`,
+			specs: []string{"number", "user.login"},
+			want:  `{"columns":["number","user.login"],"rows":[[1,"alice"],[2,"bob"],[3,"carol"],[4,"dave"]]}`,
+		},
+		{
+			name: "array with array field extraction inlined",
+			input: `[
+				{"number":1,"labels":[{"name":"bug"},{"name":"P1"}]},
+				{"number":2,"labels":[{"name":"feat"}]},
+				{"number":3,"labels":[{"name":"chore"}]},
+				{"number":4,"labels":[]}
+			]`,
+			specs: []string{"number", "labels[].name"},
+			want:  `{"columns":["number","labels"],"rows":[[1,["bug","P1"]],[2,["feat"]],[3,["chore"]],[4,[]]]}`,
+		},
+		{
+			name: "object group inlined in cell",
+			input: `[
+				{"id":1,"commit":{"author":"alice","message":"fix"}},
+				{"id":2,"commit":{"author":"bob","message":"feat"}},
+				{"id":3,"commit":{"author":"carol","message":"refactor"}},
+				{"id":4,"commit":{"author":"dave","message":"test"}}
+			]`,
+			specs: []string{"id", "commit.author", "commit.message"},
+			want:  `{"columns":["id","commit"],"rows":[[1,{"author":"alice","message":"fix"}],[2,{"author":"bob","message":"feat"}],[3,{"author":"carol","message":"refactor"}],[4,{"author":"dave","message":"test"}]]}`,
+		},
+		{
+			name: "missing values become null",
+			input: `[
+				{"number":1,"title":"bug","milestone":{"title":"v1"}},
+				{"number":2,"title":"feat"},
+				{"number":3,"title":"chore","milestone":{"title":"v2"}},
+				{"number":4,"title":"docs"}
+			]`,
+			specs: []string{"number", "title", "milestone.title"},
+			want:  `{"columns":["number","title","milestone.title"],"rows":[[1,"bug","v1"],[2,"feat",null],[3,"chore","v2"],[4,"docs",null]]}`,
+		},
+		{
+			name:  "column order follows spec declaration order",
+			input: `[{"z":1,"a":2,"m":3},{"z":4,"a":5,"m":6},{"z":7,"a":8,"m":9},{"z":10,"a":11,"m":12}]`,
+			specs: []string{"m", "z", "a"},
+			want:  `{"columns":["m","z","a"],"rows":[[3,1,2],[6,4,5],[9,7,8],[12,10,11]]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields, err := ParseCompactSpecs(tt.specs)
+			require.NoError(t, err)
+
+			got, err := CompactColumnarJSON([]byte(tt.input), fields)
+			require.NoError(t, err)
+
+			var wantVal, gotVal any
+			require.NoError(t, json.Unmarshal([]byte(tt.want), &wantVal))
+			require.NoError(t, json.Unmarshal(got, &gotVal))
+			assert.Equal(t, wantVal, gotVal)
+		})
+	}
+}
+
+func TestCompactColumnarJSON_SingleObject(t *testing.T) {
+	fields, err := ParseCompactSpecs([]string{"number", "title"})
+	require.NoError(t, err)
+
+	got, err := CompactColumnarJSON([]byte(`{"number":1,"title":"bug","body":"long"}`), fields)
+	require.NoError(t, err)
+
+	// Single objects stay as compacted per-record JSON, not columnar.
+	var gotVal any
+	require.NoError(t, json.Unmarshal(got, &gotVal))
+	assert.Equal(t, map[string]any{"number": float64(1), "title": "bug"}, gotVal)
+}
+
+func TestCompactColumnarJSON_EmptyArray(t *testing.T) {
+	fields, err := ParseCompactSpecs([]string{"number"})
+	require.NoError(t, err)
+
+	got, err := CompactColumnarJSON([]byte(`[]`), fields)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[]`, string(got))
+}
+
+func TestCompactColumnarJSON_Passthrough(t *testing.T) {
+	// Nil fields → passthrough (no compaction, no columnar).
+	got, err := CompactColumnarJSON([]byte(`[{"a":1},{"a":2}]`), nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[{"a":1},{"a":2}]`, string(got))
+}
+
+func TestCompactColumnarJSON_EmptyData(t *testing.T) {
+	fields, err := ParseCompactSpecs([]string{"number"})
+	require.NoError(t, err)
+
+	got, err := CompactColumnarJSON([]byte{}, fields)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestCompactColumnarJSON_ExcludeMode(t *testing.T) {
+	fields, err := ParseCompactSpecs([]string{"-body", "-node_id"})
+	require.NoError(t, err)
+
+	input := `[{"number":1,"title":"bug","body":"long","node_id":"x"},{"number":2,"title":"feat","body":"longer","node_id":"y"},{"number":3,"title":"chore","body":"short","node_id":"z"},{"number":4,"title":"docs","body":"med","node_id":"w"}]`
+	got, err := CompactColumnarJSON([]byte(input), fields)
+	require.NoError(t, err)
+
+	// Exclude mode: columns derived from first compacted object, sorted alphabetically.
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(got, &result))
+
+	columns, ok := result["columns"].([]any)
+	require.True(t, ok)
+	// number and title remain (body and node_id excluded), sorted alphabetically
+	assert.Equal(t, []any{"number", "title"}, columns)
+
+	rows, ok := result["rows"].([]any)
+	require.True(t, ok)
+	assert.Len(t, rows, 4)
+}
+
+func TestCompactColumnarJSON_NestedArrayInObject(t *testing.T) {
+	// Notion/Linear pattern: {"results": [{...}, {...}]} with specs like "results[].id"
+	tests := []struct {
+		name  string
+		input string
+		specs []string
+		want  string
+	}{
+		{
+			name: "small nested array stays per-record",
+			input: `{"results":[
+				{"id":"a","type":"page","noise":"x"},
+				{"id":"b","type":"database","noise":"y"}
+			]}`,
+			specs: []string{"results[].id", "results[].type"},
+			want:  `{"results":[{"id":"a","type":"page"},{"id":"b","type":"database"}]}`,
+		},
+		{
+			name: "envelope with nested array gets columnarized",
+			input: `{"results":[
+				{"id":"a","type":"page","noise":"x"},
+				{"id":"b","type":"database","noise":"y"},
+				{"id":"c","type":"page","noise":"z"},
+				{"id":"d","type":"database","noise":"w"}
+			]}`,
+			specs: []string{"results[].id", "results[].type"},
+			want:  `{"results":{"columns":["id","type"],"rows":[["a","page"],["b","database"],["c","page"],["d","database"]]}}`,
+		},
+		{
+			name: "deeply nested envelope (Linear-style issues.nodes[])",
+			input: `{"issues":{"nodes":[
+				{"id":"1","title":"Bug","state":"open","noise":"x"},
+				{"id":"2","title":"Feat","state":"closed","noise":"y"},
+				{"id":"3","title":"Chore","state":"open","noise":"z"},
+				{"id":"4","title":"Docs","state":"closed","noise":"w"}
+			],"pageInfo":{"hasNext":true,"endCursor":"abc"}}}`,
+			specs: []string{"issues.nodes[].id", "issues.nodes[].title", "issues.nodes[].state", "issues.pageInfo.hasNext", "issues.pageInfo.endCursor"},
+			want:  `{"issues":{"nodes":{"columns":["id","state","title"],"rows":[["1","open","Bug"],["2","closed","Feat"],["3","open","Chore"],["4","closed","Docs"]]},"pageInfo":{"endCursor":"abc","hasNext":true}}}`,
+		},
+		{
+			name:  "scalar arrays not columnarized",
+			input: `{"labels":[{"name":"bug"},{"name":"P1"}],"id":1}`,
+			specs: []string{"id", "labels[].name"},
+			want:  `{"id":1,"labels":["bug","P1"]}`,
+		},
+		{
+			name:  "empty nested array preserved",
+			input: `{"results":[]}`,
+			specs: []string{"results[].id"},
+			want:  `{"results":[]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields, err := ParseCompactSpecs(tt.specs)
+			require.NoError(t, err)
+
+			got, err := CompactColumnarJSON([]byte(tt.input), fields)
+			require.NoError(t, err)
+
+			var wantVal, gotVal any
+			require.NoError(t, json.Unmarshal([]byte(tt.want), &wantVal))
+			require.NoError(t, json.Unmarshal(got, &gotVal))
+			assert.Equal(t, wantVal, gotVal)
+		})
+	}
+}
+
+func TestCompactColumnarJSON_NonObjectElement(t *testing.T) {
+	// Mixed array with non-object elements falls back to per-record CompactJSON.
+	fields, err := ParseCompactSpecs([]string{"number"})
+	require.NoError(t, err)
+
+	got, err := CompactColumnarJSON([]byte(`[{"number":1},"string_element",{"number":2}]`), fields)
+	require.NoError(t, err)
+
+	// Should fall back to per-record format (array, not columnar).
+	var result []any
+	require.NoError(t, json.Unmarshal(got, &result))
+	assert.Len(t, result, 3)
+}
+
 func BenchmarkCompactJSON_ArrayOfObjects(b *testing.B) {
 	input := make([]map[string]any, 100)
 	for i := range input {
@@ -1305,4 +1547,167 @@ func BenchmarkCompactionRatio(b *testing.B) {
 		data, _ := json.Marshal(items)
 		benchCompaction(b, "Passthrough", data, nil)
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Columnar compaction benchmarks — measures savings vs per-record compacted JSON
+// ---------------------------------------------------------------------------
+//
+// Run with:  go test -bench=BenchmarkColumnar -benchmem ./...
+
+var benchColumnarSink []byte
+
+func benchColumnarCompaction(b *testing.B, name string, payload []byte, specs []string) {
+	b.Helper()
+	var fields []CompactField
+	if specs != nil {
+		var err error
+		fields, err = ParseCompactSpecs(specs)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	compacted, err := CompactJSON(payload, fields)
+	if err != nil {
+		b.Fatal(err)
+	}
+	columnar, err := CompactColumnarJSON(payload, fields)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	inputLen := len(payload)
+	compactedLen := len(compacted)
+	columnarLen := len(columnar)
+	vsTotalPct := 0
+	vsCompactedPct := 0
+	if inputLen > 0 {
+		vsTotalPct = 100 - 100*columnarLen/inputLen
+	}
+	if compactedLen > 0 {
+		vsCompactedPct = 100 - 100*columnarLen/compactedLen
+	}
+
+	b.SetBytes(int64(inputLen))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchColumnarSink, _ = CompactColumnarJSON(payload, fields)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(inputLen), "input_bytes")
+	b.ReportMetric(float64(compactedLen), "compacted_bytes")
+	b.ReportMetric(float64(columnarLen), "columnar_bytes")
+	b.ReportMetric(float64(vsTotalPct), "vs_raw_%")
+	b.ReportMetric(float64(vsCompactedPct), "vs_compacted_%")
+}
+
+func BenchmarkColumnarCompactionRatio(b *testing.B) {
+	b.Run("GitHubIssues30", func(b *testing.B) {
+		items := make([]map[string]any, 30)
+		for i := range items {
+			items[i] = map[string]any{
+				"number": i + 1, "title": "Issue title for testing compaction ratio measurement",
+				"state": "open", "html_url": "https://github.com/org/repo/issues/42",
+				"created_at": "2025-01-15T10:30:00Z", "updated_at": "2025-03-01T14:22:00Z",
+				"comments": i * 3, "body": "This is a long issue body with detailed description of the bug.",
+				"node_id": "MDU6SXNzdWUxMjM0NTY3OA==", "id": 12345678 + i,
+				"url": "https://api.github.com/repos/org/repo/issues/42", "locked": false,
+				"user":      map[string]any{"login": "developer", "id": 999, "avatar_url": "https://avatars.githubusercontent.com/u/999?v=4"},
+				"labels":    []any{map[string]any{"id": 100, "name": "bug", "color": "d73a4a"}, map[string]any{"id": 101, "name": "priority:high", "color": "e11d48"}},
+				"assignees": []any{map[string]any{"login": "alice", "id": 1001, "avatar_url": "https://avatars.githubusercontent.com/u/1001?v=4"}},
+				"milestone": map[string]any{"title": "v2.0", "id": 50, "number": 5, "state": "open"},
+			}
+		}
+		data, _ := json.Marshal(items)
+		benchColumnarCompaction(b, "GitHubIssues30", data, []string{
+			"number", "title", "state", "html_url", "created_at", "updated_at",
+			"comments", "user.login", "labels[].name", "assignees[].login", "milestone.title",
+		})
+	})
+
+	b.Run("DatadogLogs50", func(b *testing.B) {
+		items := make([]map[string]any, 50)
+		for i := range items {
+			items[i] = map[string]any{
+				"id": "AQAAAYx1234567890abcdef", "type": "log", "status": "error",
+				"service": "api-gateway", "host": "ip-10-0-1-42.ec2.internal",
+				"message":   "Connection refused: upstream service timeout after 30s",
+				"timestamp": "2025-03-01T14:22:33.456Z", "tags": []any{"env:production", "team:backend"},
+				"attributes": map[string]any{
+					"http":  map[string]any{"method": "POST", "url": "https://api.example.com/v2/webhooks", "status_code": 502},
+					"error": map[string]any{"kind": "ConnectionRefusedError", "message": "ECONNREFUSED 10.0.1.99:8080"},
+				},
+			}
+		}
+		data, _ := json.Marshal(items)
+		benchColumnarCompaction(b, "DatadogLogs50", data, []string{
+			"status", "service", "host", "message", "timestamp", "tags",
+		})
+	})
+
+	b.Run("LinearIssues25", func(b *testing.B) {
+		items := make([]map[string]any, 25)
+		for i := range items {
+			items[i] = map[string]any{
+				"id": "issue-uuid", "identifier": "ENG-123", "title": "Implement feature flag evaluation",
+				"priority": 2, "priorityLabel": "High", "estimate": 3,
+				"createdAt": "2025-01-15T10:30:00Z", "updatedAt": "2025-03-01T14:22:00Z",
+				"url": "https://linear.app/team/issue/ENG-123", "number": 123 + i,
+				"state":    map[string]any{"id": "state-uuid", "name": "In Progress", "type": "started"},
+				"assignee": map[string]any{"id": "user-uuid", "name": "Alice Developer", "email": "alice@example.com"},
+				"labels":   []any{map[string]any{"id": "label-1", "name": "feature"}, map[string]any{"id": "label-2", "name": "backend"}},
+				"project":  map[string]any{"id": "project-uuid", "name": "Q1 Platform Improvements", "state": "started"},
+				"cycle":    map[string]any{"id": "cycle-uuid", "name": "Sprint 12", "number": 12},
+			}
+		}
+		data, _ := json.Marshal(items)
+		benchColumnarCompaction(b, "LinearIssues25", data, []string{
+			"id", "identifier", "title", "state.name", "state.type", "priority",
+			"priorityLabel", "assignee.name", "labels[].name", "createdAt",
+			"updatedAt", "estimate", "project.name", "cycle.name",
+		})
+	})
+
+	b.Run("SentryIssues30", func(b *testing.B) {
+		items := make([]map[string]any, 30)
+		for i := range items {
+			items[i] = map[string]any{
+				"id": "12345", "shortId": "PROJ-A", "title": "TypeError: Cannot read properties of undefined",
+				"level": "error", "status": "unresolved", "count": "1542", "userCount": 237,
+				"firstSeen": "2025-01-15T10:30:00Z", "lastSeen": "2025-03-01T14:22:00Z",
+				"culprit":    "app/components/Dashboard.jsx in renderItems",
+				"permalink":  "https://sentry.io/organizations/org/issues/12345/",
+				"metadata":   map[string]any{"type": "TypeError", "value": "Cannot read properties of undefined"},
+				"assignedTo": map[string]any{"id": "user-1", "name": "Alice Developer", "email": "alice@example.com"},
+				"project":    map[string]any{"id": "project-1", "name": "frontend-app", "slug": "frontend-app", "platform": "javascript-react"},
+				"stats":      map[string]any{"24h": []any{[]any{1709222400, 42 + i}}},
+			}
+		}
+		data, _ := json.Marshal(items)
+		benchColumnarCompaction(b, "SentryIssues30", data, []string{
+			"id", "shortId", "title", "level", "status", "count", "userCount",
+			"firstSeen", "lastSeen", "assignedTo.name", "project.slug",
+		})
+	})
+}
+
+func BenchmarkCompactColumnarJSON_ArrayOfObjects(b *testing.B) {
+	input := make([]map[string]any, 100)
+	for i := range input {
+		input[i] = map[string]any{
+			"number": i, "title": "issue title",
+			"body":   "long body text that should be stripped",
+			"user":   map[string]any{"login": "alice", "id": 999, "avatar_url": "https://..."},
+			"labels": []any{map[string]any{"name": "bug", "color": "red"}, map[string]any{"name": "P1", "color": "blue"}},
+			"commit": map[string]any{"author": map[string]any{"name": "Alice", "email": "a@b.com"}, "message": "fix"},
+		}
+	}
+	data, _ := json.Marshal(input)
+	fields, _ := ParseCompactSpecs([]string{"number", "title", "user.login", "labels[].name", "commit.author.name", "commit.message"})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = CompactColumnarJSON(data, fields)
+	}
 }

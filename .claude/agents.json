@@ -1,0 +1,8 @@
+{
+  "agents": [
+    "go-code-reviewer",
+    "cli-architecture-reviewer",
+    "api-designer",
+    "api-documenter"
+  ]
+}

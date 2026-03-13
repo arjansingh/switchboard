@@ -635,7 +635,7 @@ func TestHandleExecute_CompactionApplied(t *testing.T) {
 				{Name: "testint_list_items", Description: "List items"},
 			},
 			execFn: func(_ context.Context, _ string, _ map[string]any) (*mcp.ToolResult, error) {
-				return &mcp.ToolResult{Data: `[{"id":1,"name":"foo","secret":"hidden"},{"id":2,"name":"bar","secret":"also hidden"}]`}, nil
+				return &mcp.ToolResult{Data: `[{"id":1,"name":"foo","secret":"hidden"},{"id":2,"name":"bar","secret":"also hidden"},{"id":3,"name":"baz","secret":"nope"},{"id":4,"name":"qux","secret":"nah"}]`}, nil
 			},
 		},
 		specs: map[string][]mcp.CompactField{
@@ -652,12 +652,55 @@ func TestHandleExecute_CompactionApplied(t *testing.T) {
 	require.False(t, result.IsError)
 
 	tc := result.Content[0].(*mcpsdk.TextContent)
-	var items []map[string]any
-	require.NoError(t, json.Unmarshal([]byte(tc.Text), &items))
-	assert.Len(t, items, 2)
-	assert.Equal(t, float64(1), items[0]["id"])
-	assert.Equal(t, "foo", items[0]["name"])
-	assert.NotContains(t, items[0], "secret", "compaction should remove unlisted fields")
+	var columnar map[string]any
+	require.NoError(t, json.Unmarshal([]byte(tc.Text), &columnar))
+
+	// Array responses use columnar format: {"columns": [...], "rows": [[...], ...]}
+	columns, ok := columnar["columns"].([]any)
+	require.True(t, ok, "expected columnar format with 'columns' key")
+	assert.Equal(t, []any{"id", "name"}, columns)
+
+	rows, ok := columnar["rows"].([]any)
+	require.True(t, ok, "expected columnar format with 'rows' key")
+	assert.Len(t, rows, 4)
+
+	row0, ok := rows[0].([]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(1), row0[0])
+	assert.Equal(t, "foo", row0[1])
+}
+
+func TestHandleExecute_CompactionSingleObjectStaysPerRecord(t *testing.T) {
+	mi := &mockFieldCompactionIntegration{
+		mockIntegration: mockIntegration{
+			name:    "testint",
+			healthy: true,
+			tools: []mcp.ToolDefinition{
+				{Name: "testint_get_item", Description: "Get item"},
+			},
+			execFn: func(_ context.Context, _ string, _ map[string]any) (*mcp.ToolResult, error) {
+				return &mcp.ToolResult{Data: `{"id":1,"name":"foo","secret":"hidden"}`}, nil
+			},
+		},
+		specs: map[string][]mcp.CompactField{
+			"testint_get_item": mustParseCompactSpecs(t, []string{"id", "name"}),
+		},
+	}
+
+	s := setupTestServer(&mi.mockIntegration)
+	s.services.Registry.(*mockRegistry).integrations["testint"] = mi
+
+	result, err := s.handleExecute(context.Background(), executeRequest("testint_get_item", nil))
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	tc := result.Content[0].(*mcpsdk.TextContent)
+	var item map[string]any
+	require.NoError(t, json.Unmarshal([]byte(tc.Text), &item))
+	assert.Equal(t, float64(1), item["id"])
+	assert.Equal(t, "foo", item["name"])
+	assert.NotContains(t, item, "secret", "compaction should remove unlisted fields")
+	assert.NotContains(t, item, "columns", "single objects should not use columnar format")
 }
 
 func TestHandleExecute_CompactionSkippedWhenNotImplemented(t *testing.T) {

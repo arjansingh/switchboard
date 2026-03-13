@@ -515,7 +515,7 @@ func compactResult(integration mcp.Integration, toolName string, data string) st
 		return data
 	}
 	originalLen := len(data)
-	compacted, err := mcp.CompactJSON([]byte(data), fields)
+	compacted, err := mcp.CompactColumnarJSON([]byte(data), fields)
 	if err != nil {
 		slog.Warn("compaction failed, returning full response", "tool", toolName, "err", err)
 		return data
