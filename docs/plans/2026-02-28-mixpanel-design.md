@@ -1994,12 +1994,60 @@ $ curl localhost:3847/mcp -d '{"method":"tools/call","params":{"name":"execute",
 
 ## Progress
 
-- [ ] Phase 1: Core Adapter Foundation
-- [ ] Phase 2: Tool Definitions + Dispatch Skeleton
-- [ ] Phase 3: Analytics Handlers (10 tools)
-- [ ] Phase 4: Events + Profiles Handlers (10 tools)
-- [ ] Phase 5: Schemas + Annotations Handlers (11 tools)
-- [ ] Phase 6: Wiring + Final Verification
+- [x] Phase 1: Core Adapter Foundation (`01bd214`)
+- [x] Phase 2: Tool Definitions + Dispatch Skeleton (`bd27faa`)
+- [x] Phase 3: Analytics Handlers (10 tools) (`78efca0`)
+- [x] Phase 4: Events + Profiles Handlers (10 tools) (`78efca0`, parallel worktree)
+- [x] Phase 5: Schemas + Annotations Handlers (11 tools) (`78efca0`, parallel worktree)
+- [x] Phase 6: Wiring + Final Verification (`557a2ef`)
+- [x] Code Review Pass (`2a7b554`, `a974c5d`)
 
 **Blockers:** none
 **Scope changes:** none
+
+---
+
+## Synopsis (2026-03-01)
+
+### Implementation Complete — All 31 Tools Shipped
+
+The Mixpanel integration is fully implemented and passing CI. Three sessions covered design, implementation, and review.
+
+### Commit History
+
+| Commit | Description |
+|--------|-------------|
+| `f0e9579` | Design doc and implementation plan |
+| `01bd214` | Core adapter: struct, Configure, HTTP helpers (query/export/app), arg helpers, tests |
+| `a0461f7` | Fix: expand app() to accept method+body, add export error test |
+| `bd27faa` | 31 tool definitions with dispatch map and parity tests |
+| `78efca0` | Analytics handlers (segmentation, funnels, retention, insights, JQL) — events and schemas done in parallel worktrees, merged here |
+| `557a2ef` | Wire into server (main.go), config defaults, web UI setup page (templ) |
+| `2a7b554` | Review fixes: Healthy() missing `/`, listCohorts POST→GET, Configure validate-then-assign, argPath() parse-at-boundary helper |
+| `a974c5d` | Guard funnel_id/bookmark_id zero-values, fix stale comment |
+
+### Review Findings & Resolutions
+
+Three review agents (drjkl-code-reviewer, go-code-reviewer, feature-dev:code-reviewer) plus manual parse-don't-validate and category theory passes. Key findings:
+
+| Finding | Resolution |
+|---------|------------|
+| `Healthy()` path missing leading `/` — would 404 in production | Fixed. Test also updated to not mask with trailing slash |
+| `listCohorts` used POST instead of GET | Fixed to GET (matches API docs and peer list operations) |
+| `Configure()` mutated struct before validation | Refactored to validate-then-assign with local variables |
+| 8 path segments not `url.PathEscape`d in schemas.go | Added `argPath()` helper (parse-don't-validate at boundary), replaced all 8 sites |
+| `funnel_id`/`bookmark_id` sent `"0"` when absent | Guarded with `if v > 0` pattern (CT coproduct collapse fix) |
+| `SetIntegration` error discarded in web.go | Skipped — matches codebase convention across all setup handlers |
+
+### Current State
+
+- **CI**: `make ci` passes clean (build, vet, test-race, lint, gosec, govulncheck)
+- **Coverage**: 86.4% in mixpanel package
+- **Files**: `mixpanel.go` (234L), `tools.go` (234L), `analytics.go` (198L), `events.go` (216L), `schemas.go` (127L), `mixpanel_test.go` (~1357L)
+- **Web UI**: `mixpanel_setup.templ` (86L) + generated `_templ.go`
+- **Branch**: `feat/mixpanel`, ready for PR
+
+### What's Left
+
+- **Create PR** against `main`
+- No known open issues or blockers
